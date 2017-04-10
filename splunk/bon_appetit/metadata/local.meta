@@ -1,0 +1,45 @@
+[app/ui]
+version = 6.4.3
+modtime = 1474730359.715872000
+
+[app/launcher]
+version = 6.4.3
+modtime = 1474730359.717240000
+
+[views/overview]
+access = read : [ * ], write : [ admin ]
+export = none
+owner = admin
+version = 6.4.3
+modtime = 1474904212.395460000
+
+[nav/default]
+version = 6.4.3
+modtime = 1474895007.069177000
+
+[views/host_audit]
+owner = admin
+version = 6.4.3
+modtime = 1474904429.816652000
+
+[views/app_audit]
+owner = admin
+version = 6.4.3
+modtime = 1474920418.568235000
+
+[views/id_search]
+owner = admin
+version = 6.4.3
+modtime = 1474929393.381976000
+
+[views/errors]
+owner = admin
+version = 6.4.3
+modtime = 1474904248.494449000
+
+[views/repo_audit]
+access = read : [ * ], write : [ admin, power ]
+export = none
+owner = admin
+version = 6.4.3
+modtime = 1474909123.036385000

@@ -1,0 +1,67 @@
+<form>
+  <label>Repo Audit</label>
+  <fieldset submitButton="false">
+    <input type="text" token="push_commit_id" searchWhenChanged="true">
+      <label>Push Commit ID</label>
+      <prefix>"track.push_commit_id"="</prefix>
+      <suffix>*"</suffix>
+      <default>*</default>
+      <initialValue>*</initialValue>
+    </input>
+    <input type="time" token="time" searchWhenChanged="true">
+      <label></label>
+      <default>
+        <earliest>-4h@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Appetite Repo Pull Audit</title>
+      <table>
+        <search>
+          <query>index=appetite sourcetype="appetite:logs" NOT log.output="Already up-to-date." $push_commit_id$            
+            | rex "(?P&lt;files_changed&gt;\d+)\s+files?\schanged" 
+            | rex "(?P&lt;file_insertions&gt;\d+)\s+insertions?" 
+            | rex "(?P&lt;file_deletions&gt;\d+)\sdeletions?" 
+            | rex field=log.output mode=sed "s/\\\n/||/g"  
+            | makemv delim="||" log.output 
+            | mvexpand log.output              
+            | stats                           
+            first(_time) as time                                                         
+            values(files_changed) as files_changed                           
+            values(file_insertions) as file_insertions                           
+            values(file_deletions) as file_deletions                           
+            values(log.output) as log.output                     
+            by track.push_abbrev_commit_id name log.triggered
+            | stats                           
+            first(time) as time
+            list(name) as name         
+            list(log.triggered) as log.triggered                                                
+            values(files_changed) as files_changed                           
+            values(file_insertions) as file_insertions                           
+            values(file_deletions) as file_deletions                           
+            values(log.output) as log.output                     
+            by track.push_abbrev_commit_id                              
+            | fillnull value=0                       
+            | convert ctime(time) as time             
+            | sort -time             
+            | table track.push_abbrev_commit_id time name log.triggered files_changed file_insertions file_deletions log.output             
+            | rename track.* as *
+            | rename log.* as *</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <drilldown>
+          <link target="My New Window">/app/bon_appetit/id_search?form.push_commit_id=$row.push_abbrev_commit_id$</link>
+        </drilldown>
+        <option name="wrap">true</option>
+        <option name="rowNumbers">false</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="count">100</option>
+      </table>
+    </panel>
+  </row>
+</form>

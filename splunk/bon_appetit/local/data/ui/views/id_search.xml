@@ -1,0 +1,202 @@
+<form>
+  <label>ID Search</label>
+  <fieldset submitButton="false">
+    <input type="text" token="uid" searchWhenChanged="true">
+      <label>Unique ID (UID)</label>
+      <prefix>"track.uid"="</prefix>
+      <suffix>"</suffix>
+      <default>?</default>
+      <initialValue>?</initialValue>
+    </input>
+    <input type="text" token="push_commit_id" searchWhenChanged="true">
+      <label>Push Commit ID</label>
+      <prefix>"track.push_commit_id"="</prefix>
+      <suffix>*"</suffix>
+      <default>?</default>
+      <initialValue>?</initialValue>
+    </input>
+    <input type="time" token="time">
+      <label></label>
+      <default>
+        <earliest>-7d@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Appetite Deployment Info</title>
+      <input type="multiselect" token="method" searchWhenChanged="true">
+        <label>Method</label>
+        <valuePrefix>method_info.name="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter>OR </delimiter>
+        <search>
+          <query>index=appetite sourcetype="appetite:host_logs"
+($uid$ OR $push_commit_id$) $status$ $sourcehostname$
+| stats count by method_info.name | fields - count</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <fieldForLabel>method_info.name</fieldForLabel>
+        <fieldForValue>method_info.name</fieldForValue>
+        <choice value="*">ALL</choice>
+        <initialValue>*</initialValue>
+      </input>
+      <input type="multiselect" token="status" searchWhenChanged="true">
+        <label>Status</label>
+        <valuePrefix>status="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter>OR </delimiter>
+        <search>
+          <query>index=appetite sourcetype="appetite:host_logs" 
+($uid$ OR $push_commit_id$) $method$ $sourcehostname$
+| stats count by status | fields - count</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <fieldForLabel>status</fieldForLabel>
+        <fieldForValue>status</fieldForValue>
+        <choice value="*">ALL</choice>
+        <initialValue>*</initialValue>
+      </input>
+      <input type="multiselect" token="sourcehostname" searchWhenChanged="true">
+        <label>Source Host</label>
+        <valuePrefix>source_hostname="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter>OR </delimiter>
+        <search>
+          <query>index=appetite sourcetype="appetite:host_logs" 
+($uid$ OR $push_commit_id$) $method$ $status$  
+| stats count by source_hostname | fields - count</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <fieldForLabel>source_hostname</fieldForLabel>
+        <fieldForValue>source_hostname</fieldForValue>
+        <choice value="*">ALL</choice>
+        <initialValue>*</initialValue>
+      </input>
+      <viz type="sankey_diagram_app.sankey_diagram">
+        <title>Left side &lt;- Built from Meta on the Host | Built from Meta in the App Directory -&gt; Right Side</title>
+        <search>
+          <query>
+            index=appetite sourcetype="appetite:app_ver"                            
+            ($uid$ OR $push_commit_id$) $method$ $status$ $sourcehostname$
+            method_info.path="etc/apps/"                           
+            | rex field=host "^(?P&lt;short_host&gt;[^\.]+)" 
+            | eval target_source = app ." - ". 'status'                            
+            | eval target_dest=short_host ." - ".  'method_info.name'
+            | stats dc(app) as count by target_source target_dest
+            
+            | append [search
+            index=appetite sourcetype="appetite:app_ver"
+            ($uid$ OR $push_commit_id$) $method$ $status$ $sourcehostname$
+            NOT method_info.path="etc/apps/"
+            | rex field=host "^(?P&lt;short_host&gt;[^\.]+)" 
+            | eval target_source = app ." - ". 'status'    
+            | eval target_dest = source_hostname ." - ".  'method_info.name'
+            | where NOT short_host=source_hostname 
+            | stats count(app) as count by target_source target_dest]
+            
+            | append [search
+            index=appetite sourcetype="appetite:app_ver"
+            ($uid$ OR $push_commit_id$) $method$ $status$ $sourcehostname$
+            NOT method_info.path="etc/apps/"
+            | rex field=host "^(?P&lt;short_host&gt;[^\.]+)" 
+            | eval target_source = source_hostname ." - ".  'method_info.name'
+            | eval target_dest = short_host ." - ".  'method_info.name'
+            | where NOT short_host=source_hostname 
+            | stats count(app) as count by target_source target_dest]
+            </query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="height">600px</option>
+        <option name="drilldown">none</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLabels">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.showTooltip">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.useColors">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.colorMode">categorical</option>
+        <option name="sankey_diagram_app.sankey_diagram.showLegend">true</option>
+        <option name="sankey_diagram_app.sankey_diagram.minColor">#d93f3c</option>
+        <option name="sankey_diagram_app.sankey_diagram.maxColor">#3fc77a</option>
+        <option name="sankey_diagram_app.sankey_diagram.numOfBins">6</option>
+        <option name="sankey_diagram_app.sankey_diagram.showSelf">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.showBackwards">false</option>
+        <option name="sankey_diagram_app.sankey_diagram.styleBackwards">false</option>
+      </viz>
+      <table>
+        <title>Application Info</title>
+        <search>
+          <query>index=appetite sourcetype="appetite:host_logs" content_type=update                                        
+                    ($uid$ OR $push_commit_id$) $method$ $status$ $sourcehostname$                                
+                | rex field=host "^(?P&lt;short_host&gt;[^\.]+)"                                                                            
+                | mvcombine delim=", " method_info.install_ignore
+				| fillnull value="?"
+                | stats list(short_host) as short_host                           
+                list(commit_log.app_abbrev_commit_id) as commit_log.app_abbrev_commit_id
+                values(app_clean) as app_clean                               
+                list(status) as status                        
+                list(commit_log.author_name) as author_name                        
+                list(commit_log.author_email) as author_email                        
+                list(commit_log.subject) as subject                          
+                list(method_info.delete_first) as delete_first                                     
+                list(method_info.install_ignore) as install_ignore                                     
+                list(method_info.path) as path                                     
+                list(method_info.restart) as restart                                     
+                list(method_info.update_method) as update_method           
+                list(commit_log.project) as commit_log.project                    
+                list(commit_log.reponame) as commit_log.reponame                       
+                by app method_info.name
+				| fillnull value="?"
+				| rename commit_log.* as *
+				| rename method_info.name as method_name                                  
+                | rename method_info.* as *
+                | table app_clean app method_name short_host app_abbrev_commit_id status author_name author_email subject delete_first install_ignore path</query>
+		  <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <drilldown>
+          <link target="_blank">/app/bon_appetit/app_audit?form.app=$row.app_clean$</link>
+        </drilldown>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">true</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="count">100</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    
+    <panel>
+	<title>Current Run Info</title>
+      <table>
+        <title>Servers where App/Version are currently running</title>
+        <search>
+          <query>| rest /services/apps/local splunk_server=*
+            | rename splunk_server as host       
+            | rename eai:acl.perms.* as *                 
+            | stats values(title) as title values(version) as version  values(visible) as visible  values(core) as core  values(disabled) as disabled  values(read) as read  values(write) as write by label host
+            | rename title as app_clean
+            | rex field=version "_(?P&lt;splunk_commit_id&gt;[^_]*)$"
+            | search [ search index=appetite sourcetype="appetite:host_logs" content_type=update  
+            ($uid$ OR $push_commit_id$)  
+            | table app_clean commit_log.app_abbrev_commit_id
+			| rename commit_log.app_abbrev_commit_id as splunk_commit_id]
+			| rename splunk_commit_id as app_abbrev_commit_id
+            | rename label as app
+            | table host app_clean app version visible core disabled read write app_abbrev_commit_id</query>
+		  <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <drilldown>
+          <link target="_blank">/app/bon_appetit/host_audit?form.app_splunk_server=$row.host$</link>
+        </drilldown>
+        <option name="count">100</option>
+        <option name="drilldown">row</option>
+      </table>
+    </panel>
+  </row>
+</form>

@@ -1,0 +1,95 @@
+<form>
+  <label>App Audit</label>
+  <fieldset submitButton="false">
+    <input type="dropdown" token="app" searchWhenChanged="true">
+      <label>Application (Clean Name)</label>
+      <search>
+        <query>index=appetite sourcetype="appetite:event_logs" app_clean=* | stats count by app_clean | sort app_clean | fields + app_clean</query>
+      </search>
+      <fieldForLabel>app_clean</fieldForLabel>
+      <fieldForValue>app_clean</fieldForValue>
+      <prefix>"</prefix>
+      <suffix>"</suffix>
+    </input>
+    <input type="time" token="time">
+      <label>Time</label>
+      <default>
+        <earliest>0</earliest>
+        <latest></latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Current Application Version / Host</title>
+      <table>
+        <search>
+          <query>| rest /services/apps/local splunk_server=* 
+| search title=$app$
+| rename eai:acl.perms.* as *                
+| stats   values(title) as title values(version) as version  values(visible) as visible  values(core) as core  values(disabled) as disabled  values(read) as read  values(write) as write by splunk_server label
+| rename splunk_server as host
+| rename title as app_clean
+| join  type=left app_clean host
+[search 
+index=appetite sourcetype="appetite:app_ver" NOT source=*update* app_clean=$app$
+| stats latest(app) as app
+latest(repo_source) as repo_source  
+latest(track.uid) as track.uid  
+latest(track.push_commit_id) as track.push_commit_id 
+latest(commit_log.abbrv_commit_id) as commit_log.abbrv_commit_id 
+latest(commit_log.author_name) as commit_log.author_name 
+latest(commit_log.author_email) as commit_log.author_email  by host app_clean
+| eval track.push_commit_id = substr('track.push_commit_id',1,7)]
+| rex field=version "_(?P&lt;splunk_commit_id&gt;[^_]*)$"
+| eval app_ver_match=if(match(splunk_commit_id,'commit_log.abbrv_commit_id'),"1","0")
+| table host app_clean app app_ver_match version visible core disabled read write repo_source track.uid track.push_commit_id commit_log.author_name commit_log.author_email 
+| sort -track.push_commit_id
+| fillnull value=0</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <drilldown>
+          <link target="_blank">/app/bon_appetit/host_audit?form.app_splunk_server=$row.host$</link>
+        </drilldown>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="count">100</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Application History</title>
+      <table>
+        <search>
+          <query>index=appetite sourcetype="appetite:event_logs" app_clean=$app$ NOT status=unchanged  
+| stats first(_time) as time 
+values(app_clean) as app_clean 
+values(app) as app 
+values(repo_source) as repo_source 
+values(status) as status 
+values(commit_log.author_name) as commit_log.author_name 
+values(commit_log.author_email) as commit_log.author_email 
+values(commit_log.subject) as commit_log.subject 
+by commit_log.app_abbrev_commit_id track.push_abbrev_commit_id track.uid  
+| convert ctime(time) as time 
+| sort - time
+| rename commit_log.* as *
+| rename track.* as *</query>
+          <earliest>0</earliest>
+        </search>
+        <drilldown>
+          <link target="_blank">/app/bon_appetit/id_search?form.uid=$row.uid$</link>
+        </drilldown>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+  </row>
+</form>

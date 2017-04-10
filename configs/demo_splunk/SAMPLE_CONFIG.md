@@ -1,0 +1,1 @@
+These are sample config files used within appetite.

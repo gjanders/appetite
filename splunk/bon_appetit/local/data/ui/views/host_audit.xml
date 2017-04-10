@@ -1,0 +1,103 @@
+<form>
+  <label>Host Audit</label>
+  <fieldset submitButton="false">
+    <input type="dropdown" token="app_splunk_server" searchWhenChanged="true">
+      <label>Splunk Server</label>
+      <search>
+        <query>| rest /services/apps/local splunk_server=*  | stats values(splunk_server) as splunk_server | mvexpand splunk_server</query>
+        <earliest>0</earliest>
+      </search>
+      <fieldForLabel>splunk_server</fieldForLabel>
+      <fieldForValue>splunk_server</fieldForValue>
+      <prefix>"</prefix>
+      <suffix>"</suffix>
+    </input>
+    <input type="radio" token="app_match" searchWhenChanged="true">
+      <label>Appetite match Splunk?</label>
+      <choice value="*">All</choice>
+      <choice value="1">Yes</choice>
+      <choice value="0">No</choice>
+      <default>*</default>
+      <prefix>app_ver_match=</prefix>
+    </input>
+    <input type="radio" token="show_core" searchWhenChanged="true">
+      <label>Core Apps</label>
+      <choice value="*">All</choice>
+      <choice value="1">Core</choice>
+      <choice value="0">Not Core</choice>
+      <default>*</default>
+    </input>
+    <input type="radio" token="show_disabled" searchWhenChanged="true">
+      <label>Disabled Apps</label>
+      <choice value="*">All</choice>
+      <choice value="0">Enabled</choice>
+      <choice value="1">Disabled</choice>
+      <default>0</default>
+    </input>
+    <input type="radio" token="show_visible" searchWhenChanged="true">
+      <label>Visible Apps</label>
+      <choice value="*">All</choice>
+      <choice value="1">Visible</choice>
+      <choice value="0">Hidden</choice>
+      <default>1</default>
+      <initialValue>1</initialValue>
+    </input>
+    <input type="text" token="filter" searchWhenChanged="true">
+      <label>Filter (Clean App Name)</label>
+      <default>*</default>
+    </input>
+    <input type="time" token="time">
+      <label></label>
+      <default>
+        <earliest>0</earliest>
+        <latest></latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <search>
+          <query>| rest /services/apps/local splunk_server=$app_splunk_server$           
+| search ((core="$show_core$" OR NOT core=*)               
+(disabled="$show_disabled$" OR NOT disabled=*)               
+(visible="$show_visible$" OR NOT visible=*)               
+(title="*$filter$*"))
+| rename splunk_server as host               
+| rename eai:acl.perms.* as *                
+| stats   values(title) as title values(version) as version  values(visible) as visible  values(core) as core  values(disabled) as disabled  values(read) as read  values(write) as write by label
+| rename title as app_clean
+| join  type=left app_clean 
+[search index=appetite host=$app_splunk_server$ sourcetype="appetite:app_ver" NOT source=*update*  
+| stats latest(app) as app
+latest(repo_source) as repo_source 
+latest(track.uid) as track.uid 
+latest(track.push_abbrev_commit_id) as track.push_abbrev_commit_id
+latest(commit_log.app_abbrev_commit_id) as commit_log.app_abbrev_commit_id
+latest(commit_log.author_name) as commit_log.author_name
+latest(commit_log.author_email) as commit_log.author_email 
+by app_clean]
+| rex field=version "_(?P&lt;splunk_commit_id&gt;[^_]*)$"
+| eval app_ver_match=if(match(splunk_commit_id,'commit_log.app_abbrev_commit_id'),"1","0")
+| table app_clean app app_ver_match version visible core disabled read write repo_source track.uid track.push_abbrev_commit_id commit_log.author_name commit_log.author_email
+| sort -core
+| fillnull value=0
+| search $app_match$
+| rename commit_log.* as *
+| rename track.* as *
+          </query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <drilldown>
+          <link target="_blank">/app/bon_appetit/app_audit?form.app=$row.app_clean$</link>
+        </drilldown>
+        <option name="wrap">true</option>
+        <option name="rowNumbers">false</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="count">100</option>
+      </table>
+    </panel>
+  </row>
+</form>

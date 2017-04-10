@@ -1,0 +1,17 @@
+<nav search_view="search" color="#a3c2c2">
+  <view name="overview" default='true' />
+  <view name="id_search" />
+  <collection label="Audit">
+  	<view name="app_audit" />
+  	<view name="host_audit" />
+    <view name="repo_audit" />
+  </collection>
+  <collection label="Splunk">
+  	<view name="search" />
+  	<view name="data_models" />
+  	<view name="reports" />
+  	<view name="alerts" />
+  	<view name="dashboards" />
+  </collection>
+  <view name="errors" />
+</nav>

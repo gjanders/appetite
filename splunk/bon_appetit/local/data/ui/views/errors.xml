@@ -1,0 +1,65 @@
+<form>
+  <label>Errors</label>
+  <fieldset submitButton="false">
+    <input type="text" token="uid" searchWhenChanged="true">
+      <label>Unique ID (UID)</label>
+      <prefix>"track.uid"="</prefix>
+      <suffix>"</suffix>
+      <default>*</default>
+      <initialValue>*</initialValue>
+    </input>
+    <input type="text" token="push_commit_id" searchWhenChanged="true">
+      <label>Push Commit ID</label>
+      <prefix>"track.push_commit_id"="</prefix>
+      <suffix>*"</suffix>
+      <default>*</default>
+      <initialValue>*</initialValue>
+    </input>
+    <input type="time" token="time" searchWhenChanged="true">
+      <label></label>
+      <default>
+        <earliest>-4h@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <search>
+          <query>index=appetite sourcetype="appetite:logs" level=ERROR $uid$ $push_commit_id$
+| fillnull value="?" 
+| stats  latest(_time) as time values(name) as name 
+values(log.hostname) as log.hostname 
+values(log.app) as log.app          
+values(log.commit_id) as log.commit_id 
+values(level) as level   
+values(log.cmd) as log.cmd   
+values(log.track.push_abbrev_commit_id) as track.push_abbrev_commit_id   
+values(log.error) as log.error   
+values(log.msg) as log.msg   
+values(log.path) as log.path   
+by track.uid 
+| convert ctime(time) as time  
+| fillnull value="?" 
+| sort -time 
+| table  time name log.hostname log.app log.commit_id log.cmd log.msg log.error log.path track.uid track.push_abbrev_commit_id
+| rename track.* as *          
+          </query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <drilldown>
+          <link target="_blank">
+            /app/bon_appetit/id_search?form.uid=$row.uid$
+          </link>
+        </drilldown>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">false</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="count">100</option>
+      </table>
+    </panel>
+  </row>
+</form>

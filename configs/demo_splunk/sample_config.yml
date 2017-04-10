@@ -1,0 +1,4 @@
+DOMAIN: "conf2016.com"
+template_test: "test_filter"
+user: "admin"
+password: "changeme"
