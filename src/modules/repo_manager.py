@@ -94,6 +94,11 @@ class RepoManager(object):
             logger.errorout("Pulling_repo", err_msg=e.message,
                             error="Error pulling repo", path=self.paths['repo_path'])
 
+    def run_command(self, cmd):
+        """Run command on repo directory
+        """
+        return helpers.run(cmd, self.paths['repo_path'], self.dryrun)
+
     def set_commit_id(self, commit_id=None):
         """Checks out the commit id for the repo
         """
@@ -104,7 +109,20 @@ class RepoManager(object):
             return True
 
         cmd = "git checkout {0}".format(checkout_id)
-        output, rc = helpers.run(cmd, self.paths['repo_path'], self.dryrun)
+        output, rc = self.run_command(cmd)
+
+        if rc > 0:
+            # Corrupted checkout state, try to recover
+            logger.warn("Possible corrupted checkout state", desc="Problem with checkout", error=output,
+                        commit_id=checkout_id, path=self.paths['repo_path'],
+                        cmd=cmd, track=self.track)
+
+            # Want to guarantee that the branch is completely reset.
+            git_reset_output, rc = self.run_command("git reset --hard {0}".format(checkout_id)) #pylint: disable=unused-variable
+
+            if rc < 1:
+                # Clean up git so there are no untracked files.
+                self.run_command("git clean -fd")
 
         if rc > 0:
             logger.errorout("set_commit_id", desc="Problem setting commit id", error=output,
