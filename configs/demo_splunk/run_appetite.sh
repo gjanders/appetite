@@ -20,7 +20,7 @@ HOST_LIST=("splunk-lm001-0c"
 HOSTS="${HOST_LIST[@]]}"
 
 # Can use inventory scripts to pull hosts.  Example below is for aws.
-# HOSTS=$(python ../../script/inventory/aws/get_inv.py --name-query splunk-* --add-quotes)
+# HOSTS=$(python ../../src/inventory/aws/get_inv.py --name-query splunk-* --add-quotes)
 
 function appetite_call {
     # $1 -> param config
