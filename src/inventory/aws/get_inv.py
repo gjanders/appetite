@@ -5,36 +5,32 @@
 import sys
 import re
 import argparse
-from boto import ec2
+import boto3
 
 
-def get_instance_info(region, name_filter, regex_filter):
+def get_instance_info(region, name_filter):
     """Get information about instances.
 
     Returns:
         Get instances based on name filter
     """
 
-    conn = ec2.connect_to_region(region)
-    reservations = conn.get_all_instances(filters=name_filter)
+    ec2 = boto3.resource('ec2', region_name=region)
+
+    instances_found = list(ec2.instances.filter(Filters=[{'Name': 'tag:Name', 'Values': [name_filter]},
+                                                         {'Name': 'instance-state-name', 'Values': ['running']}]
+                                                ).all())
     try:
-        instances_found = [inst_i for res in reservations for inst_i in res.instances]
         if len(instances_found) < 1:
             return []
 
-        unique_ami_ids = list(set([inst_j.image_id for inst_j in instances_found]))
-        instance_users = {ami_id.id: 'centos' if ami_id.description and 'centos' in ami_id.description.lower()
-                                     else 'ec2-user' for ami_id in conn.get_all_images(image_ids=unique_ami_ids)}
-        instances = []
-        for inst_info in instances_found:
-            if inst_info.state == 'running' and re.search(regex_filter, inst_info.tags['Name']):
-                instances.append({'instance': inst_info, 'user': instance_users[inst_info.image_id]})
+        return [{'name': next((tag['Value'] for tag in inst_info.tags if tag['Key'] == 'Name'), ""),
+                 'instance': inst_info
+                 } for inst_info in instances_found]
     except Exception as e: # pylint: disable=bare-except
         print "Instances %s do not exist." % name_filter
         print e.message
         sys.exit(1)
-
-    return instances
 
 
 def add_quotes(input_str, is_quotes_added):
@@ -69,12 +65,14 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    instances_info = get_instance_info(args.region, {'tag:Name': args.name_query}, args.regex_filter)
+    instances_info = get_instance_info(args.region, args.name_query)
 
     for inst in instances_info:
         instance = inst['instance']
-        if args.just_ip:
-            output_str = "%s" % instance.private_ip_address
-        else:
-            output_str = "%s:%s" % (instance.tags['Name'].split('.')[0], instance.private_ip_address)
-        print '"%s"' % output_str if args.add_quotes else output_str
+
+        if re.search(args.regex_filter, inst['name']):
+            if args.just_ip:
+                output_str = "%s" % instance.private_ip_address
+            else:
+                output_str = "%s:%s" % (inst['name'].split('.')[0], instance.private_ip_address)
+            print '"%s"' % output_str if args.add_quotes else output_str
