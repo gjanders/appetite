@@ -8,7 +8,7 @@ import argparse
 import boto3
 
 
-def get_instance_info(region, name_filter):
+def get_instance_info(region, tag, name_filter):
     """Get information about instances.
 
     Returns:
@@ -17,9 +17,12 @@ def get_instance_info(region, name_filter):
 
     ec2 = boto3.resource('ec2', region_name=region)
 
-    instances_found = list(ec2.instances.filter(Filters=[{'Name': 'tag:Name', 'Values': [name_filter]},
-                                                         {'Name': 'instance-state-name', 'Values': ['running']}]
-                                                ).all())
+    ec2_filter = [{'Name': 'instance-state-name', 'Values': ['running']}]
+
+    if name_filter:
+        ec2_filter.append({'Name': 'tag:%s' % tag, 'Values': [name_filter]})
+
+    instances_found = list(ec2.instances.filter(Filters=ec2_filter).all())
     try:
         if len(instances_found) < 1:
             return []
@@ -52,7 +55,7 @@ def parse_args():
         description='Params for pulling aws instances for appetite')
 
     parser.add_argument("-n", "--name-query", help="filter on name based on aws tag",
-                        required=True, dest="name_query")
+                        dest="name_query")
     parser.add_argument("-x", "--regex", help="Secondary regex used for instance filtering",
                         dest="regex_filter", default="(.*?)")
     parser.add_argument("-r", "--region", help="region to query", default="us-west-2")
@@ -60,12 +63,14 @@ def parse_args():
                         default=False, dest="add_quotes")
     parser.add_argument("-i", "--just-ips", help="get just the ips", action='store_true',
                         default=False, dest="just_ip")
+    parser.add_argument("-t", "--tag", help="Tag to query",
+                        dest="tag", default="Name")
 
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
-    instances_info = get_instance_info(args.region, args.name_query)
+    instances_info = get_instance_info(args.region, args.tag, args.name_query)
 
     for inst in instances_info:
         instance = inst['instance']

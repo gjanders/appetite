@@ -53,10 +53,9 @@ TEST_HOST_LIST = [
     "splunk-dcm001-0c",
     "splunk-scm001-0c",
     "splunk-scm002-0c",
-    "splunk-scm003-0c"
+    "splunk-scm003-0c",
+    "splunk-scs001-0c"
 ]
-
-HOST_CLASSES = "lm cm ds idx dcm shm sha scm scs"
 
 
 def set_command_cmd(ext_args=""):
@@ -118,6 +117,7 @@ def clean_tmp_folders():
     delete_log_dir()
     delete_path(TMP_DIR)
     delete_path(META_DIR)
+    delete_file("appetite_lock")
 
 
 def delete_path(path):
@@ -127,6 +127,15 @@ def delete_path(path):
             shutil.rmtree(path)
     except Exception as e:
         raise Exception("Problem deleting folder; path: %s error: %s" % (LOG_DIR, e.message))
+
+
+def delete_file(file_path):
+    """Delete file"""
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        raise Exception("Problem deleting file; path: %s error: %s" % (LOG_DIR, e.message))
 
 
 def get_entry(*args):

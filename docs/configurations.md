@@ -88,6 +88,9 @@ This is used to determine class, pre and post fix.
 <a name="param_num_conns"></a>Number of concurrent threads that deal with updating hosts.
 This is dependent on [--boot-order](#param_boot_order) which can limit the number of concurrent hosts i.e., if there's one host that has a defined class, only one host will update.
 
+    --new-host-brakes
+<a name="new_host_brakes"></a>If a new host if found, override [--num-conns](#param_num_conns) count to 1.
+
     -d, --debug
 <a name="param_debug"></a>Turns on debugging output.
 
@@ -129,6 +132,9 @@ Used for testing Appetite logic and seeing what the payload will be.
     --site-override
 <a name="param_site_override"></a>By default all updates will be done a single site at a time in [--boot-order](#param_boot_order).  This will override that setting and Update all host within a [--boot-order](#param_boot_order).
 
+    --deployment-methods-file
+<a name="deployment_methods_file"></a>The deployment methods file appetite will look for.  
+default: `deploymentmethods.conf`
 
 ## Templating
 
@@ -162,6 +168,12 @@ The following variables are available:
 * ssh_hostname - Either the hostname or the ip.  Determined from the entered [--hosts](#param_hosts) data. <a name="hgv_ssh_hostname"></a>
 * restart - Host will be restarted.  Generated from manifest.
 * updates - If hosts have been updated (bool). Generated from manifest change logic.
+* host_groups - Hostnames split into groups.
+     * app_class[ 'user defined host class' ] - A list of hosts based on a host class.
+     * all - A list of all hosts.
+     * ref[ 'hostname' ] - Gives the SSH Connection hostname/IP for a given hostname.
+     * limited_hosts - List of host based on `limit_to_hosts` and `exclude_hosts` in commands.conf.
+
 
 Example:
 The first 'd' is replaced with an 's' in the host name.

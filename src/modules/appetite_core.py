@@ -9,24 +9,33 @@ and hosts.
 import sys
 import os
 import traceback
-import re
 import json
 import logger
 import consts
 import helpers
 import deployment_methods
 
-FILTER_COMMANDS = re.compile(r"-auth.* ", re.IGNORECASE)
-
 
 class AppetiteHosts(object):
     """Class to store a working list of hosts"""
     hosts = []
+    meta_info = {"host_groups": {"app_class": {}, "all": [], "ref": {}}}
 
     def add_host(self, _source, _hostname, host_data, _ssh_hostname=None, _tarname=None):
         """Add host to list"""
+        host_classes = self.meta_info["host_groups"]["app_class"]
+        host_all = self.meta_info["host_groups"]["all"]
+        host_ref = self.meta_info["host_groups"]["ref"]
         if next((False for host in self.hosts if host.hostname == _hostname), True):
-            self.hosts.append(AppetiteHost(_source, _hostname, host_data, _ssh_hostname, _tarname))
+            app_host = AppetiteHost(_source, _hostname, host_data, _ssh_hostname, _tarname)
+            self.hosts.append(app_host)
+
+            # Create vars used for templating cmd
+            if app_host.app_class not in host_classes:
+                host_classes[app_host.app_class] = []
+            host_classes[app_host.app_class].append(app_host.hostname)
+            host_all.append(app_host.hostname)
+            host_ref[app_host.hostname] = app_host.ssh_hostname
 
     def is_empty(self):
         """Host empty check"""
@@ -35,6 +44,17 @@ class AppetiteHosts(object):
     def __iter__(self):
         for host in self.hosts:
             yield host
+
+    def build_meta(self, template_values):
+        host_classes = self.meta_info["host_groups"]["app_class"]
+        host_all = self.meta_info["host_groups"]["all"]
+
+        for appclass in host_classes:
+            sorted(appclass)
+
+        sorted(host_all)
+
+        return helpers.merge_templates([template_values, self.meta_info])
 
 
 class AppetiteHost(object):
@@ -60,6 +80,7 @@ class AppetiteHost(object):
         self.manifest_found = False
         self.restart = False
         self.can_connect = None
+        self.bootstrap = False
 
         self.updates = None
 

@@ -47,8 +47,9 @@ class Appetite(object):
 
     # Stores and manages host and their applications
     appetite_hosts = AppetiteHosts()
+    run_check = Helpers.RunSingleInstance()
 
-    def __init__(self, is_already_running):
+    def __init__(self):
         self.args = parse_args()
 
         # default path for configs
@@ -78,7 +79,14 @@ class Appetite(object):
                              self.args.silent,
                              self.args.logging_path)
 
-        if is_already_running:
+        # Get path for lock file
+        self.scratch_location = os.path.join(os.path.abspath(
+            os.path.expandvars(self.args.scratch_dir)), self.args.refname)
+
+        self.run_check.set_lockfile(os.path.join(self.scratch_location, Helpers.APPETITE_LOCKFILE))
+
+        # Makes sure there is only one instance of this script running
+        if self.run_check.lock().is_running:
             Logger.info("Appetite is already processing")
             self.print_track_info(False, Helpers.get_track())
             return
@@ -96,14 +104,14 @@ class Appetite(object):
             self.args.boot_order, self.host_classes)
 
         self.repo_name = self.args.repo_url.split('/')[-1].split('.')[0]
-        self.scratch_location = os.path.join(os.path.abspath(
-            os.path.expandvars(self.args.scratch_dir)), self.args.refname)
+
         self.repo_path = os.path.join(self.scratch_location, self.repo_name)
         self.apps_folder = os.path.join(self.repo_path, self.args.apps_folder)
         self.manifest_path = os.path.join(
             self.repo_path, Consts.CONFIG_PATH_NAME, self.args.apps_manifest)
         self.tmp_folder = os.path.join(self.scratch_location, self.args.tmp_folder)
         self.meta_folder = os.path.join(self.scratch_location, 'meta')
+
         self.tars_folder = os.path.join(self.tmp_folder, 'tars')
         self.hosts_folder = os.path.join(self.tmp_folder, 'hosts')
         self.remote_apps_path = os.path.normpath(self.args.app_folder)
@@ -128,13 +136,21 @@ class Appetite(object):
 
         Logger.debug_on(self.args.debug)
 
+        self.ssh_app_commands = None
+        self.deployment_manager = None
+        self.template_values = {}
+
+    @property
+    def is_running(self):
+        return self.run_check.is_running
+
+    def process_hosts(self):
+
         if not self.args.tmp_folder:
             Logger.errorout("tmp folder must be defined")
 
         # Deleting the tmp folder to keep installs clean
         Helpers.delete_path(self.tmp_folder)
-
-        self.template_values = {}
 
         try:
             if self.args.template_files:
@@ -164,9 +180,6 @@ class Appetite(object):
                                 self.args.app_binary,
                                 self.args.dryrun)
 
-        self.ssh_app_commands = ConnManager.SshAppCommands(
-            self.app_commands_file, self.template_values)
-
         # Load any files reference to appetite scripts folder before this
         # Working directories change with repo management
         repo_status = self.repo_manager.pull_repo(self.args.clean_repo)
@@ -191,7 +204,8 @@ class Appetite(object):
 
         # Load in deploymentmethods.conf
         self.deployment_manager = DeploymentMethodsManager(self.repo_name, "",
-                                                           self.scratch_location)
+                                                           self.scratch_location,
+                                                           self.args.deployment_methods_file)
 
         # Generate hosts
         if self.args.hosts:
@@ -234,6 +248,9 @@ class Appetite(object):
 
         self.populate_apps_to_hosts()
 
+        self.ssh_app_commands = ConnManager.SshAppCommands(
+            self.app_commands_file, self.template_values)
+
         changes_found = self.create_host_directories_and_tar()
 
         if changes_found:
@@ -256,6 +273,7 @@ class Appetite(object):
         with open(self.manifest_path, 'rU') as csvfile:
             mreader = csv.reader(csvfile, delimiter=',', quotechar='"')
             first_row = True
+
             # Go though each app
             for row in mreader:
                 # Remove header if it exists
@@ -301,16 +319,43 @@ class Appetite(object):
                     # Go through each host and see
                     # if the app is needed for the host
                     for host in self.appetite_hosts:
-                        hostname = host.hostname
-                        self.add_host(host, hostname, row_values, None, False)
-                        self.bootstrap_firstrun_hosts(host, hostname, row_values)
+                        self.add_to_host(host, row_values)
+                        self.bootstrap_firstrun_hosts(host, row_values)
+
+            if self.args.new_host_brakes and next((True for host in self.appetite_hosts if host.bootstrap), False):
+                self.args.num_connections = 1
 
             if self.appetite_hosts.is_empty():
                 Logger.errorout("Manifest misconfiguration, "
                                 "no apps for any hosts")
 
-    def bootstrap_firstrun_hosts(self, host, hostname, row_values):
-        """Function used to bootstrap apps on the first fun"""
+    def get_host_from_app_class(self, app_class):
+        return next((host.hostname for host in self.appetite_hosts if host.app_class == app_class), "")
+
+    def bootstrap_firstrun_hosts(self, host, row_values):
+        """Function used to bootstrap apps on the first run"""
+
+        first_run = self.is_bootstrap(host)
+
+        if first_run:
+            # For the special case when instance is new,
+            # start up apps have to be included
+            if first_run['update_method'] == row_values.deployment:
+                if not host.bootstrap:
+                    host.bootstrap = True
+                    Logger.info("Bootstrapping host", host=host.hostname)
+
+                # get host name to check againt
+                check_hostname = next((host.hostname for host in self.appetite_hosts
+                                       if host.app_class == first_run['app_class']), "")
+
+                return self.add_to_host(host, row_values, check_hostname,
+                                        first_run['ref_method'],
+                                        True)
+        return False
+
+    def is_bootstrap(self, host):
+        """Check if host is bootstrapped"""
 
         # Only run if the manifest is not found on the host (new app instance)
         if self.args.firstrun and not host.manifest_found:
@@ -318,34 +363,36 @@ class Appetite(object):
                               self.deployment_manager.startup_bootstrap if
                               su_bootstrap['ref_class'] == host.app_class and
                               Helpers.check_name_formatting(
-                                  self.name_formatting, hostname)), None)
+                                  self.name_formatting, host.hostname)), None)
             host.restart = True
-            if first_run:
-                # For the special case when instance is new,
-                # #start up apps have to be included
-                if first_run['update_method'] == row_values.deployment:
-                    built_hostname = Helpers.build_hostname(self.name_formatting,
-                                                            first_run['app_class'], 1)
-                    self.add_host(host, built_hostname, row_values,
-                                  first_run['ref_method'],
-                                  True)
 
-    def add_host(self, host, hostname, row_values, deployment, is_firstrun):
-        """Add app to host"""
+            return first_run
 
-        if Helpers.check_host(hostname,
+    def add_to_host(self, host, row_values, check_hostname=None, deployment=None, is_firstrun=False):
+        """Check and add app to host"""
+
+        check_hn = check_hostname if check_hostname else host.hostname
+
+        if Helpers.check_host(check_hn,
                               row_values.black_list,
                               row_values.white_list):
-            host.add_app(self.args.refname,
-                         AppetiteHost.create_app(
-                             self.repo_manager,
-                             self.deployment_manager,
-                             row_values.app,
-                             row_values.app_clean,
-                             deployment if deployment else row_values.deployment,
-                             row_values.commit_id,
-                             hostname,
-                             is_firstrun))
+            self.add_app(host, row_values, deployment, is_firstrun, check_hn)
+            return True
+        return False
+
+    def add_app(self, host, row_values, deployment, is_firstrun, ref_hostname=None):
+        """Add app to host"""
+
+        host.add_app(self.args.refname,
+                     AppetiteHost.create_app(
+                         self.repo_manager,
+                         self.deployment_manager,
+                         row_values.app,
+                         row_values.app_clean,
+                         deployment if deployment else row_values.deployment,
+                         row_values.commit_id,
+                         ref_hostname if ref_hostname else host.hostname,
+                         is_firstrun))
 
     def create_host_directories_and_tar(self):
         """Main packaging function
@@ -460,7 +507,7 @@ class Appetite(object):
                                 meta_to_append = app.clone
                                 meta_to_append.update_app_version(app)
 
-                            # to track is a app is removed it is removed from the remote meta
+                            # to track if an app is removed from the remote meta
                             remote_metas.remove(remote_meta)
 
                     if not meta_to_append:
@@ -468,10 +515,15 @@ class Appetite(object):
                         meta_to_append = app.set_status_added()
 
                     if remote_meta and meta_to_append:
-                        Logger.debug("Check meta logic",
-                                     outcome=Helpers.debug_app_versions(meta_to_append,
+                        meta_outcome = Helpers.debug_app_versions(meta_to_append,
                                                                         remote_meta,
-                                                                        meta_to_append.status))
+                                                                        meta_to_append.status)
+                        Logger.debug("Check meta logic",
+                                     outcome=meta_outcome)
+
+                        if meta_to_append.has_changed:
+                            Logger.info("App change", logic=meta_outcome)
+
                     apps_meta.append(meta_to_append)
                 else:
                     Logger.error("Missing application",
@@ -850,10 +902,13 @@ class Appetite(object):
 
         commands = []
 
+        self.template_values = self.appetite_hosts.build_meta(self.template_values)
+
         # Run commands if specified
         if len(host.updates[update_method]) > 0:
-            commands = self.ssh_app_commands.enhance_commands(
-                host.updates[update_method], [self.template_values, host.to_dict])
+            commands = self.ssh_app_commands.enhance_commands(host,
+                host.updates[update_method], [self.template_values,
+                                              host.to_dict])
 
         not_update_command = update_method != Consts.DM_COMMANDS_SEQUENCE[1]
 
@@ -889,7 +944,7 @@ class Appetite(object):
 
         # Restart App if needed
         if (host.updates["restart"] or host.restart) and restart_notfound:
-            commands.append(self.ssh_app_commands.enhance_commands(
+            commands.append(self.ssh_app_commands.enhance_commands(host,
                 [ConnManager.COMMAND_RESTART_NAME], [self.template_values,
                                                      host.to_dict])[0])
 
@@ -900,7 +955,7 @@ class Appetite(object):
 
         # Clean up old manifest files
         ConnManager.rotate_logs(host, self.meta_remote_logs_folder,
-                                Consts.DEFAULT_LOG_RETENTION)
+                                Consts.DEFAULT_LOG_RETENTION, True)
 
     def run_commands(self, commands, host, run_commands=False, pre_install=False):
         """Run listed commands"""
@@ -908,7 +963,7 @@ class Appetite(object):
         for command in commands:
             command_object = command['command']
             if run_commands or command_object.pre_install == pre_install:
-                if not self.args.dryrun and self.ssh_app_commands.run_command(command, host)\
+                if self.ssh_app_commands.run_command(command, host) and not self.args.dryrun \
                         and command_object.delay > 0:
                     time.sleep(command_object.delay)
 
@@ -919,15 +974,16 @@ def call_func(args):
 
 
 def main():
-    # Makes sure there is only one instance of this script running
-    with Helpers.RunSingleInstance() as is_running:
-        try:
-            Appetite(is_running)
-        except Exception as e:
-            trace_list = traceback.format_exc().split('\n')
-            Logger.exception("Catch all", e, err_message=e.message, trace=trace_list)
-            sys.exit(1)
+    appetite = Appetite()
 
+    if not appetite.is_running:
+        try:
+            appetite.process_hosts()
+        except Exception as e:
+            Logger.exception("Catch all", e, err_message=e.message, trace=str(traceback.format_exc()))
+            sys.exit(1)
+        finally:
+            appetite.run_check.unlock()
 
 if __name__ == "__main__":
     main()

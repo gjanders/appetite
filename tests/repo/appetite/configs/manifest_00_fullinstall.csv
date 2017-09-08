@@ -9,5 +9,5 @@ CommitID,Application,DeploymentMethod,Whitelist,Blacklist
 ,App07,StandAlone,splunk-.*c$,"splunk-cm.*c$,splunk-lm.*c$"
 ,App08,StandAlone,splunk-sha.*c$,
 ,App09,StandAlone,splunk-shm.*c$,
-,App10,StandAlone,splunk-(shm|shm).*c$,
-,App11[test],StandAlone,splunk-(shm|shm).*c$,
+,App10,StandAlone,splunk-(shm|sha).*c$,
+,App11[test],StandAlone,splunk-(shm|sha).*c$,

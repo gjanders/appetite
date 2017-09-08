@@ -190,6 +190,10 @@ add_arg('--num-conns', metavar='t', type=int,
         default=consts.DEFAULT_THREAD_POOL_SIZE,
         help='Number of concurrent connections used')
 
+add_arg('--new-host-brakes', action='store_true',
+        default=False, dest="new_host_brakes",
+        help='If a new host if found, override thread count to 1.')
+
 add_arg('-d', '--debug', action='store_true',
         default=False,
         help='Turns on debugging output')
@@ -254,3 +258,8 @@ add_arg('--site-override', metavar='t', type=str,
              'single site at a time in boot-order. '
              'This will override that setting and '
              'Update all host within a boot-order')
+
+add_arg('--deployment-methods-file', metavar='t', type=str,
+        default=consts.DEPLOYMENT_METHODS_FILENAME,
+        dest="deployment_methods_file",
+        help='The deployment methods file appetite will look for.')

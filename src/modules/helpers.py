@@ -25,7 +25,8 @@ import version
 DM_FILTER_COMMANDS = re.compile(r"-auth.* ", re.IGNORECASE)
 REDIRECT_COMMANDS = ['&&', '&', '>', '1>', '2>', '>>', '1>>', '2>>', '<', '&>', '|', "||"]
 REMOVE_LAST_FOLDER = re.compile(r"[^/]+/?$")
-LOCK_PATH = "/tmp/appetite_lock" # nosec
+APPETITE_LOCKFILE = "appetite_lock"
+LOCK_PATH = "/tmp/%s" % APPETITE_LOCKFILE # nosec
 
 
 def create_path(path, is_dir=False):
@@ -686,32 +687,64 @@ def move_regexed_files(regex_lines, src_path, dest_path): # pylint: disable=too-
 
 class RunSingleInstance(object):
     """Class to lock script instance so other instances can not run"""
-    def __init__(self):
+    def __init__(self, lockfile=LOCK_PATH):
         """Init RunSingleInstance
         """
-        self.filelock = None
-        self.is_already_running = False
+        self.__filelock = None
+        self.__is_running = False
+        self.__checked = False
+
+        self.set_lockfile(lockfile)
 
     def __enter__(self):
         """Enter RunSingleInstance class
-        :return: is_running
+        :return: self
         """
+        self.__checked = True
+
         try:
-            self.filelock = open(LOCK_PATH, 'w')
-            fcntl.lockf(self.filelock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except EnvironmentError:
-            if self.filelock is not None:
-                self.is_already_running = True
-        return self.is_already_running
+            self.__filelock = open(self.__lockfile, 'w+')
+            # None blocking lock
+            fcntl.lockf(self.__filelock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError:
+            if self.__filelock is not None:
+                self.__is_running = True
+        return self
 
     def __exit__(self, type, value, tb): # pylint: disable=redefined-builtin
         """Exit RunSingleInstance class
         :return: None
         """
         try:
-            if not self.is_already_running:
-                fcntl.lockf(self.filelock, fcntl.LOCK_UN)
-                self.filelock.close()
-                os.unlink(LOCK_PATH)
+            if not self.__is_running:
+                fcntl.lockf(self.__filelock, fcntl.LOCK_UN)
+                self.__filelock.close()
+                os.unlink(self.__lockfile)
         except Exception as err:
             logger.error("Error unlocking single instance file", error=err.message)
+
+    def lock(self):
+        """Run function to lock file
+        :return: self
+        """
+        return self.__enter__()
+
+    def unlock(self):
+        """Unlock and delete file
+        :return: None
+        """
+        self.__exit__(None, None, None)
+
+    def set_lockfile(self, lockfile):
+        """set lock file
+        :return: None
+        """
+        if not self.__checked:
+            self.__lockfile = lockfile
+
+    @property
+    def is_running(self):
+        """Returns if the app is already running
+        :return: true | false
+        """
+        return self.__is_running

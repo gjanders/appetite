@@ -59,6 +59,7 @@ DM_COMMANDS_SEQUENCE = ['run_first_script', 'commands', 'run_last_script']
 DEFAULT_THREAD_POOL_SIZE = 10
 DEFAULT_LOG_RETENTION = 30  # days
 REMOTE_CMD_RUN_SLEEP_TIMER = 30  # seconds
+REMOTE_AUTH_RUN_SLEEP_TIMER = 5  # seconds
 
 # Pulling commit logs have standard names, this helps format the correctly
 RENAME_COMMIT_LOG_KEYS = {

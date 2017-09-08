@@ -85,7 +85,7 @@ class SingleDeploymentMethod(object):
 class DeploymentMethodsManager(object):
     """Class to manage list of deployments"""
 
-    def __init__(self, _reponame, _repo_path, _scratch_folder):
+    def __init__(self, _reponame, _repo_path, _scratch_folder, _deployment_methods_file):
         """Init of deployment methods manager"""
         self.paths = {
             'scratch_path': _scratch_folder,
@@ -96,7 +96,7 @@ class DeploymentMethodsManager(object):
                                                _reponame)
         self.paths['dm_filepath'] = os.path.join(self.paths['repo_path'],
                                                  consts.CONFIG_PATH_NAME,
-                                                 consts.DEPLOYMENT_METHODS_FILENAME)
+                                                 _deployment_methods_file)
 
         self.deployment_methods = []
         self.boot_order = []

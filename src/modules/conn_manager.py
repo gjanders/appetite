@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=too-complex,relative-import,no-member,invalid-name,too-many-arguments,import-error
+# pylint: disable=too-complex,relative-import,no-member,invalid-name,too-many-arguments,import-error,too-many-nested-blocks
 """Command Manger
 
 Module to handle ssh communication.  Commands are either dictated though
@@ -9,6 +9,9 @@ functions or restricted configuration files.
 import os
 import json
 import time
+import re
+import datetime
+import uuid
 import paramiko
 from scp import SCPClient
 
@@ -28,7 +31,6 @@ CREDS = helpers.create_obj(
     }
 )
 
-COMMAND_CLASS_NAME = 'limit_to_hosts'
 COMMAND_RESTART_NAME = 'restart'
 COMMAND_MODULE_INIT = 'initization'
 COMMAND_MODULE_CUSTOM = 'custom_command'
@@ -43,7 +45,10 @@ MANDATORY_COMMAND_STANZAS = [
 MAX_SSH_RETRIES = 3
 MAX_SCP_RETRIES = 4
 SESSION_TIMEOUT = 30
+SESSION_SHELL_TIMEOUT = 3600
+SESSION_RESPONSE_TIMEOUT = 300
 CONNECTION_TIMEOUT = 10
+SESSION_SHELL_EXIT = uuid.uuid4().hex
 
 # Filtering for error ssh messasge.
 ERROR_MESSAGES = [
@@ -76,25 +81,36 @@ class SshAppCommand(object): # pylint: disable=too-many-instance-attributes
     user = None
     password = None
 
-    def __init__(self, config, name, options, render_funct, index=-1):
+    def __init__(self, config, name, options, index=-1): # pylint: disable=too-many-branches
         """Init single ssh command"""
 
         self.limit_to_hosts = []
-        self.suppress_limit_to_hosts_warnings = False
-        self.use_auth = False
+        self.exclude_hosts = []
+        self.limited_host_list = []
+        self.limit_sites = []
+        self.limit_indexes = []
+        self.suppress_limit_to_hosts_warnings = True
+        self.use_auth = []
         self.name = name
         self.cmd = None
         self.use_root = False
         self.use_app_binary = True
         self.pre_install = False
         self.index = index
+        self.only_run_on_init = False
         self.delay = consts.REMOTE_CMD_RUN_SLEEP_TIMER
 
         for option in options:
             try:
                 config_option = config.get(name, option).strip('"\'')
-                if COMMAND_CLASS_NAME == option:
+                if option == 'limit_to_hosts':
                     self.limit_to_hosts = json.loads(config_option)
+                elif option == 'exclude_hosts':
+                    self.exclude_hosts = json.loads(config_option)
+                elif option == 'limit_sites':
+                    self.limit_sites = json.loads(config_option)
+                elif option == 'limit_indexes':
+                    self.limit_indexes = json.loads(config_option)
                 elif option == 'use_root':
                     self.use_root = config.getboolean(name, option)
                 elif option == 'use_app_binary':
@@ -102,11 +118,13 @@ class SshAppCommand(object): # pylint: disable=too-many-instance-attributes
                 elif option == 'suppress_limit_to_hosts_warnings':
                     self.suppress_limit_to_hosts_warnings = config.getboolean(name, option)
                 elif option == 'use_auth':
-                    self.use_auth = config.getboolean(name, option)
+                    self.use_auth = json.loads(config_option)
                 elif option == 'pre_install':
                     self.pre_install = config.getboolean(name, option)
+                elif option == 'only_run_on_init':
+                    self.only_run_on_init = config.getboolean(name, option)
                 elif option == 'cmd':
-                    self.cmd = render_funct(config_option)
+                    self.cmd = config_option
                 elif option == 'delay':
                     self.delay = int(config_option)
             except Exception as e:
@@ -116,12 +134,100 @@ class SshAppCommand(object): # pylint: disable=too-many-instance-attributes
                                 module=COMMAND_MODULE_INIT,
                                 error_msg=str(e))
 
-    def can_host_use(self, host_class):
-        """Checks if command can be used by hosr"""
-        if len(self.limit_to_hosts) < 1:
-            return True
+    def generate_limited_hosts(self, template_values):
+        host_groups = template_values["host_groups"]
 
-        return host_class in self.limit_to_hosts
+        exclude_hosts = [host for host_class in self.exclude_hosts
+                         if host_class in host_groups["app_class"]
+                         for host in host_groups["app_class"][host_class]]
+
+        limited_hosts = [host for host_class in self.limit_to_hosts
+                         if host_class in host_groups["app_class"]
+                         for host in host_groups["app_class"][host_class]] \
+            if len(self.limit_to_hosts) > 0 else host_groups["all"]
+
+        tvalue = dict(template_values)
+        tvalue["host_groups"]["limited_hosts"] = list(set(limited_hosts) - set(exclude_hosts))
+
+        return tvalue
+
+    def can_host_use(self, host):
+        """Checks if command can be used by host"""
+        if host.app_class in self.exclude_hosts:
+            return False
+
+        valid = False
+
+        # Is host valid to run command
+        if len(self.limit_to_hosts) < 1 or host.app_class in self.limit_to_hosts:
+            valid = True
+
+        # Limit host to a site
+        if valid and len(self.limit_sites) > 0 and str(host.site) not in self.limit_sites:
+            valid = False
+
+        # Limit host to a index
+        if valid and len(self.limit_indexes) > 0 and str(host.host_index) not in self.limit_indexes:
+            valid = False
+
+        return valid
+
+
+class SshAppAuth(object):
+    def __init__(self, config, name, options, template_values):
+        """Auth handling"""
+
+        self.__postfix = ""
+        self.__postfix_filtered = ""
+        self.__postfix_reads = {}
+        self.__inputs = []
+        self.__delay = consts.REMOTE_AUTH_RUN_SLEEP_TIMER
+        self.__template_values = template_values
+
+        for option in options:
+            try:
+                config_option = config.get(name, option)
+                if option == 'postfix':
+                    self.__prefix = config_option.strip('"\'')
+                    self.__postfix_filtered = self.__prefix
+                    # Find template values using regex
+                    template_groups = re.findall("\\{\\{\\s*\\w+\\s*\\}\\}", self.__prefix, re.DOTALL)
+
+                    if template_groups:
+                        auth_kv = {}
+                        for template_key in template_groups:
+                            field = template_key.strip("{} ")
+
+                            if field not in auth_kv:
+                                auth_kv[field] = {"fields": []}
+                            if template_key not in auth_kv[field]["fields"]:
+                                auth_kv[field]["fields"].append(template_key)
+
+                        # Replace cmd vars with locally generated vars which hide values
+                        for k, v in auth_kv.items():
+                            for j2_value in v["fields"]:
+                                self.__postfix_filtered = self.__postfix_filtered.replace(j2_value, "$%s" % k)
+                            self.__postfix_reads[k] = "{{ %s }}" % k
+            except Exception as e:
+                logger.errorout("Problem getting option from auth",
+                                name=name,
+                                module=COMMAND_MODULE_INIT,
+                                error_msg=str(e))
+
+    @property
+    def postfix(self):
+        """Return prefix with rendered values"""
+        return self.__render_values(self.__prefix)
+
+    @property
+    def postfix_filtered(self):
+        """Return prefix with rendered values are rendered outside the prefix"""
+        return {"prefix": self.__postfix_filtered, "reads": {k: self.__render_values(v)
+                                                             for k, v in self.__postfix_reads.items()}}
+
+    def __render_values(self, value):
+        """Render values based on templates"""
+        return helpers.render_template(value.strip('"\''), self.__template_values)
 
 
 class SshAppCommands(object):
@@ -132,12 +238,11 @@ class SshAppCommands(object):
     """
 
     _commands = {}
-    __auth = ""
+    __auth = {}
 
     def __init__(self, commands_config, template_values):
         """Init Shh App Commands"""
 
-        self.__auth = ""
         self.template_values = template_values
 
         # set xform for config otherwise text will be normalized to lowercase
@@ -154,11 +259,11 @@ class SshAppCommands(object):
         for section in sections:
             options = self.config.options(section)
 
-            if section == 'auth':
-                self.__auth = self.render_values(self.config.get(section, 'postfix'))
+            if section.startswith('auth'):
+                self.__auth[section] = SshAppAuth(self.config, section, options, self.template_values)
                 continue
 
-            self._commands[section] = SshAppCommand(self.config, section, options, self.render_values, index)
+            self._commands[section] = SshAppCommand(self.config, section, options, index)
             index += 1
 
         if not set(MANDATORY_COMMAND_STANZAS) <= set(self._commands):
@@ -166,17 +271,14 @@ class SshAppCommands(object):
                             needed=MANDATORY_COMMAND_STANZAS,
                             module=COMMAND_MODULE_INIT)
 
-    def render_values(self, value):
-        return helpers.render_template(value.strip('"\''), self.template_values)
-
     def find_commands(self, command_name):
         """Basic command to find command"""
 
         return self._commands[command_name] if command_name in self._commands \
             else None
 
-    def enhance_commands(self, commands_list, templating_values):
-        """Checks and enchances with known listed commands"""
+    def enhance_commands(self, host, commands_list, templating_values):
+        """Checks and enhances cmd with known listed commands and extra variables"""
 
         tvalues = helpers.merge_templates(templating_values)
 
@@ -194,9 +296,9 @@ class SshAppCommands(object):
 
         enhance_list = [self._commands[command] for command in unique_list]
 
-        filtered_commands = [{"cmd": helpers.render_template(command.cmd, tvalues),
+        filtered_commands = [{"cmd": helpers.render_template(command.cmd, command.generate_limited_hosts(tvalues)),
                               "command": command}
-                             for command in enhance_list]
+                             for command in enhance_list if not command.only_run_on_init or not host.manifest_found]
 
         return filtered_commands
 
@@ -210,19 +312,31 @@ class SshAppCommands(object):
         if command.use_app_binary:
             app_cmd = "%s %s" % (os.path.join(CREDS.APP_DIR, CREDS.APP_BIN), app_cmd)
 
+        helpers.cmd_check(app_cmd)
+
+        reads = {}
         if not is_clean:
             if command.use_auth:
-                app_cmd = "%s %s" % (app_cmd, self.__auth)
+                add_auth, reads = self.filtered_auth(command.use_auth)
+                app_cmd = "%s %s" % (app_cmd, add_auth)
 
             if command.use_root:
                 app_cmd = "sudo %s" % app_cmd
 
-        return app_cmd
+        return {"cmd": app_cmd, "reads": reads}
+
+    def filtered_auth(self, use_auth):
+        """Return auths where reads are seperate"""
+        auth_prefixes = [self.__auth[auth].postfix_filtered for auth in use_auth]
+        prefixes = " ".join([auth["prefix"] for auth in auth_prefixes])
+        reads = {k: v for auth in auth_prefixes for k, v in auth["reads"].items()}
+
+        return prefixes, reads
 
     def get_cmd_clean(self, ecommand):
         """Returns clean cmd command"""
 
-        return self.get_cmd(ecommand, is_clean=True)
+        return self.get_cmd(ecommand, is_clean=True)["cmd"]
 
     def run_command(self, ecommand, host):
         """Run single stored command"""
@@ -230,7 +344,7 @@ class SshAppCommands(object):
         command = ecommand['command']
 
         # Check to see if host can run command
-        if not command.can_host_use(host.app_class):
+        if not command.can_host_use(host):
             if not command.suppress_limit_to_hosts_warnings:
                 logger.warn("Invalid host for command",
                             command=command.name,
@@ -389,9 +503,10 @@ class SshRun(object):
         return run_obj
 
     def _add_root(self, cmd):
+        """If root is given, add to command"""
         return "sudo %s" % cmd if self.is_root else cmd
 
-    def run_single(self, cmd, ssh=None):
+    def run_single(self, command, ssh=None):
         """Runs a single cmd command on the remote host
         """
 
@@ -403,23 +518,45 @@ class SshRun(object):
                         "function": self.function_name}
             ssh = self.ssh
 
+        reads = None
+        cmd = command
+        if isinstance(command, dict):
+            cmd = command['cmd']
+            reads = command['reads']
+
         rc = 0
         std_out = ""
         std_error = ""
 
-        # Simple check on cmd to look for redirection
-        helpers.cmd_check(cmd)
-
         if not CREDS.DRY_RUN:
-            # Dangerous command, only use if commands are filtered/protected
-            # Only command either defined here or in the command.conf should
+            # Dangerous, only use if commands are filtered/protected
+            # Only commands either defined here or in the command.conf should
             # run here.
-            stdin, stdout, stderr = ssh.exec_command(self._add_root(cmd), get_pty=True, timeout=SESSION_TIMEOUT)  # nosec
-            rc = stdout.channel.recv_exit_status()
+            if reads:
+                # Only use invoke shell if needed
+                channel = ssh.invoke_shell()  # nosec
 
-            std_out = stdout.read()
-            std_error = stderr.read()
-            stdin.flush()
+                channel.settimeout(SESSION_SHELL_TIMEOUT)
+
+                # Remove any ssh login messages
+                send_command(channel, "")
+
+                read_commands = []
+                for param, value in reads.items():
+                    read_commands.append("read -s %s" % param)
+                    read_commands.append(value)
+
+                    # Don't want to log any read commands
+                    send_command(channel, read_commands)
+
+                std_out, std_error, rc = send_command(channel, self._add_root(cmd))
+            else:
+                stdin, stdout, stderr = ssh.exec_command(self._add_root(cmd), get_pty=True, timeout=SESSION_TIMEOUT)  # nosec
+                rc = stdout.channel.recv_exit_status()
+
+                std_out = stdout.read()
+                std_error = stderr.read()
+                stdin.flush()
 
         return {"stdout": std_out,
                 "stderror": std_error,
@@ -657,6 +794,124 @@ def check_path(remote_object, app_path_check=True):
                         path_check=app_path_check)
             return False
     return True
+
+
+def send_command(channel, send_cmds, std_out=None, std_err=None):
+    """Execute commands in an interactive shell"""
+
+    # Get first line to extract out messages
+    send_to_channel(channel, "\r")
+
+    # Run actual commands
+    if isinstance(send_cmds, list):
+        for cmd in send_cmds:
+            send_to_channel(channel, "%s" % cmd)
+    else:
+        send_to_channel(channel, "%s" % send_cmds)
+
+    # Run final command, this will help find the end of execution
+    send_to_channel(channel, "echo %s $?" % SESSION_SHELL_EXIT)
+
+    # wait and get output from full execution
+    stdout, stderr, rc = get_std_out_from_channel(channel)
+    stderr += get_std_error_from_channel(channel)
+
+    # Can add to existing std out and error
+    if std_out is not None:
+        std_out += stdout
+    if std_err is not None:
+        std_err += stderr
+
+    return stdout, stderr, rc
+
+
+def send_to_channel(channel, cmd):
+    """Send commands to an existing channel"""
+    while not channel.send_ready():
+        time.sleep(1)
+    channel.send("%s\n" % cmd)
+    time.sleep(1)
+
+
+def get_std_error_from_channel(channel):
+    """Get std Error from an existing channel"""
+    stderr = ""
+    # Make sure we read everything off the error buffer
+    if channel.recv_stderr_ready():
+        error_buff = channel.recv_stderr(1024)
+        while error_buff:
+            stderr += error_buff
+            error_buff = channel.recv_stderr(1024)
+    return stderr
+
+
+def get_std_out_from_channel(channel): # pylint: disable=too-many-branches,too-many-locals
+    """Read all std out and filter content"""
+    stdout = ""
+    stderr = ""
+    overall_time = {"secs": 0, "start_dt": datetime.datetime.now()}
+    no_response_time = {"secs": 0, "start_dt": datetime.datetime.now()}
+    rc = 0
+    re_prompt_compiled = None
+    all_cmd_parsed = False
+
+    # Limit time exec can run
+    while (overall_time["secs"] < SESSION_SHELL_TIMEOUT and
+           no_response_time["secs"] < SESSION_RESPONSE_TIMEOUT and not all_cmd_parsed):
+        # Timers to exit if response takes too long or unresponsive
+        overall_time["secs"] = (datetime.datetime.now() - overall_time["start_dt"]).seconds
+        no_response_time["secs"] = (datetime.datetime.now() - no_response_time["start_dt"]).seconds
+
+        if channel.recv_ready():
+            no_response_time["start_dt"] = datetime.datetime.now()
+            # Lots of filtering since it is using an interactive shell
+            std_buff = re.sub(r'(\x9B|\x1B\[)[0-?]*[ -/]*[@-~]', '', channel.recv(9999)).replace('\b', '').replace('\r', '')
+
+            lines = std_buff.split("\n")
+            if not re_prompt_compiled:
+                first_valid_line = next((line for line in lines if len(line) > 0), None)
+                if first_valid_line:
+                    # Exit out characters for regex and insert wildcard for path
+                    re_prompt = re.sub(r'([\.\\\+\*\?\[\^\]\$\(\)\{\}\!\<\>\|\:\-])', r'\\\1', first_valid_line).replace("~", ".*")
+                    # Compiled regex to remove bash prefix from commandline
+                    re_prompt_compiled = re.compile(re_prompt)
+
+            new_out = []
+            if re_prompt_compiled:
+                for line in lines:
+                    # Remove bash prefix
+                    bash_found = re_prompt_compiled.search(line)
+                    new_line = re_prompt_compiled.sub('', line)
+
+                    # Look for the exit token
+                    if SESSION_SHELL_EXIT in new_line:
+                        if 'echo' not in new_line:
+                            # Found end of command
+                            rc = int(new_line[-1])
+                            stdout += "\n".join(new_out)
+                            all_cmd_parsed = True
+                            break
+                    elif not bash_found and len(new_line) > 0:
+                        # Incase theres a continuation of the line like a load bar, might make output messy but better
+                        # then having a huge amount of lines
+                        if len(lines) == 1:
+                            stdout += new_line
+                        else:
+                            new_out.append(new_line)
+            if all_cmd_parsed:
+                break
+
+            stdout += "\n".join(new_out)
+
+        time.sleep(1)
+
+    if overall_time["secs"] >= SESSION_SHELL_TIMEOUT:
+        stderr += "Shell session timed out.\n"
+
+    if no_response_time["secs"] >= SESSION_RESPONSE_TIMEOUT:
+        stderr += "Shell session no response, could be waiting for input.\n"
+
+    return stdout, stderr, rc
 
 
 # Helper error checking
