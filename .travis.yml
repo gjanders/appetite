@@ -12,10 +12,12 @@ before_script:
   - pip install -r src/requirements.txt
   - pip install coverage
   - pip install coveralls
+  - pip install bandit
 
 script:
+  - bandit -r . -lll
   - python tests/test.py
   - coverage run tests/test.py
 
 after_success:
-  coveralls
+  - coveralls
