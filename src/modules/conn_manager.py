@@ -504,7 +504,9 @@ class SshRun(object):
 
     def _add_root(self, cmd):
         """If root is given, add to command"""
-        return "sudo %s" % cmd if self.is_root else cmd
+        #Hacked - GA, don't sudo
+        #return "sudo %s" % cmd if self.is_root else cmd
+        return cmd
 
     def run_single(self, command, ssh=None):
         """Runs a single cmd command on the remote host
@@ -575,12 +577,12 @@ def copy_to_host(host, remote_file, local_file, is_root=False):
     _lpath, lfilename = os.path.split(local_file)
     rpath, rfilename = os.path.split(remote_file)
 
-    local_filepath = os.path.join('./', lfilename)
+    local_filepath = os.path.join('./', lfilename)      
 
     if len(rfilename) < 1:
         rfilename = lfilename
         remote_file = os.path.join(rpath, rfilename)
-
+    
     if not os.path.isfile(local_file):
         logger.error("File to copy does not exist",
                      file=local_file,
@@ -666,9 +668,9 @@ def untar(host, location, is_root):
             func_name,
             cmd=tar_cmd,
             hostname=host.hostname,
-            content=outcome['outputs'][0]['stdout'].split('\r\n') if outcome['rc'] < 1 else "",
+            content=outcome['outputs'][0]['stdout'].split('\r\n') if outcome['rc'] != 0 else "",
             location=location,
-            module=COMMAND_MODULE_BUILTIN)
+            module=COMMAND_MODULE_BUILTIN)    
 
     return True
 
@@ -736,7 +738,6 @@ def get_json_file(host, remote_file, local_file, is_root=False):
         return False
 
     file_content = get_file_content(host, remote_file, local_file, is_root)
-
     if file_content['rc'] > 0:
         return False
 

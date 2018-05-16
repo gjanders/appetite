@@ -67,9 +67,12 @@ class AppetiteHost(object):
     def __init__(self, _source, _hostname, host_data, _ssh_hostname, _tarname):
         """Init of a host object"""
         self.hostname = _hostname
-        self.app_class = host_data[consts.NAME_FORMATTING[0]['name']]
-        self.site = host_data[consts.NAME_FORMATTING[1]['name']]
-        self.host_index = host_data[consts.NAME_FORMATTING[2]['name']]
+        self.app_class = "N/A"
+        #self.app_class = host_data[consts.NAME_FORMATTING[0]['name']]
+        #self.site = host_data[consts.NAME_FORMATTING[1]['name']]
+        self.site = "1"
+        #self.host_index = host_data[consts.NAME_FORMATTING[1]['name']]
+        self.host_index = 001
         self.tarname = _tarname if _tarname else _hostname
         self.ssh_hostname = _ssh_hostname if _ssh_hostname else _hostname
         self.local_meta_file = os.path.join(_source.meta_folder,

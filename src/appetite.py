@@ -240,7 +240,7 @@ class Appetite(object):
         if self.args.clean_metas:
             Helpers.delete_path(self.meta_folder)
 
-        # Only update if a manifest file is not found
+        # Only update if a manifest file is not found        
         self.update_manifests(check_if_exists=True)
 
         Logger.info("appetite started", use_templating=self.args.templating,
@@ -316,6 +316,10 @@ class Appetite(object):
                             with open(app_test_file, 'wb') as touch:
                                 touch.write("")
 
+                    # validate commit id
+                    if len(row_values.commit_id) > 0 and not Helpers.validate_commit_id(row_values.commit_id):
+                        Logger.critical("Invalid commit ID", commit_id=row_values.commit_id)
+                                
                     # Go through each host and see
                     # if the app is needed for the host
                     for host in self.appetite_hosts:
@@ -640,16 +644,17 @@ class Appetite(object):
                                                                                   app_dest)
 
                             if lookup_inclusion_results['errors_found']:
-                                Logger.error("Lookup inclusion error found",
-                                             paths=lookup_inclusion_results['path_errors'],
-                                             hostname=hostname,
-                                             app=updated_app.name)
+                                Logger.warn("Lookup inclusion error found",
+                                            paths=lookup_inclusion_results['path_errors'],
+                                            hostname=hostname,
+                                            app=updated_app.name,
+                                            todo="Remove file/path from inclusion..")
                                 # Problem with host inclusion,
                                 # move to next host
                                 continue
 
                             updated_app.method_info['inclusions'] = \
-                                lookup_inclusion_results['filed_moved']
+                                lookup_inclusion_results['files_moved']
 
                             # Update objects with inclusions
                             updated_app.copy_value_to_method_info('inclusions', apps_meta)
@@ -675,13 +680,13 @@ class Appetite(object):
                                 chmod = 0755
                                 os.chmod(os.path.join(host_path, host_file), chmod)
 
-                        with open(os.path.join(app_dest, Helpers.get_app_version_filename()), "w") as f:
-                            f.write(updated_app.to_json)
-
-                        AppVersioning.create_app_version(app_dest,
-                                                         updated_app.
-                                                         commit_log['app_abbrev_commit_id'])
-
+                        if not updated_app.method_info['no_appetite_changes']:
+                            with open(os.path.join(app_dest, Helpers.get_app_version_filename()), "w") as f:
+                                f.write(updated_app.to_json)
+                            
+                            AppVersioning.create_app_version(app_dest,
+                                                             updated_app.
+                                                             commit_log['app_abbrev_commit_id'])
             apps_distro = Helpers.content_wrapper(apps_meta,
                                                   Consts.META_CURRENT,
                                                   hostname,
@@ -689,8 +694,7 @@ class Appetite(object):
 
             # Meta file used as source of truth on instance
             master_meta = self.create_meta_files(tmp_hostname_meta, '', apps_distro)
-
-            # check be used to update and test manifest changes locally
+            # check be used to update and test manifest changes locally            
             if self.args.dryrun:
                 Helpers.create_path(host.local_meta_file)
                 shutil.copy(master_meta, host.local_meta_file)
@@ -779,7 +783,7 @@ class Appetite(object):
 
     def update_manifest(self, host, check_if_exists=False):
         """Loads local manifest for a host for local host"""
-
+        
         host.manifest_found = os.path.isfile(host.local_meta_file)
         if not check_if_exists or not host.manifest_found:
             if self.check_host_connection(host):
@@ -841,7 +845,7 @@ class Appetite(object):
         # Lists Sites
         host_sites = list(set([host.site for host in self.appetite_hosts]))
         host_sites.sort()
-
+        
         # Organize scripts to run in order
         for script_seq in Consts.DM_COMMANDS_SEQUENCE:
             for boot_group in self.boot_ordering:

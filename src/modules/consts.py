@@ -37,20 +37,7 @@ TEMPLATING_EXTS = JSON_EXTS + YMAL_EXTS
 HOST_LOGS_FOLDER_NAME = "logs"
 
 # Name formatting for host names
-NAME_FORMATTING = [
-    {
-        'name': "appclass",
-        'format_type': "str"
-    },
-    {
-        'name': "site",
-        'format_type': "str"
-    },
-    {
-        'name': "num",
-        'format_type': "num"
-    },
-]
+NAME_FORMATTING = []
 
 NAME_FORMATTING_SPLIT_TOKEN = 11110000100001111
 

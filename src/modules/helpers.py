@@ -97,6 +97,11 @@ def get_utc():
     """Basic function to get Datetime in Zulu"""
     return "%sZ" % (datetime.datetime.utcnow().isoformat("T"))
 
+def validate_commit_id(commit_id):
+    """Checks if the input is a valid commit id
+    """
+
+    return re.match("[0-9a-fA-F]{6,40}", commit_id) is not None
 
 def filter_content(content):
     """Filter content to make sure it can be built into json object
@@ -387,17 +392,18 @@ def pull_class_from_host(naming_format, hostname, app_classes):
 
     # Check to see if the pre-post fixes are the same as the
     # naming formating
-    if not check_name_formatting(naming_format, hostname):
-        return None
-
-    return next((host_data for app_class in app_classes if host_data[consts.NAME_FORMATTING[0]['name']] == app_class), None)
+    #if not check_name_formatting(naming_format, hostname):
+    #    return None
+    
+    #return next((host_data for app_class in app_classes if host_data[consts.NAME_FORMATTING[0]['name']] == app_class), None)
+    return "N/A"
 
 
 def pull_data_from_host(naming_format, hostname, already_found):
     """Pull the data from the host name based on the naming format"""
 
     fillers = {}
-
+    
     value_to_parse = None
     for name_format in consts.NAME_FORMATTING:
         name = name_format['name']
@@ -437,7 +443,7 @@ def build_hostname(naming_format, s_class, host_num):
 
     name = render_template(naming_format, {
         consts.NAME_FORMATTING[0]['name']: s_class,  # class
-        consts.NAME_FORMATTING[1]['name']: "0",      # site
+        consts.NAME_FORMATTING[1]['name']: "",      # site
         consts.NAME_FORMATTING[2]['name']: host_num  # host index
     })
 
@@ -553,7 +559,9 @@ def content_process(apps_meta, status_types, hostname, track, isupdate):
         for seq in consts.DM_COMMANDS_SEQUENCE:
             # Preserve sequence order and remove dups
             source[seq] = []
-            [source[seq].append(commands) for app in changed_content for commands in app.method_info[seq] if commands not in source[seq]]  # pylint: disable=expression-not-assigned
+            [source[seq].append(commands) for app in changed_content # pylint: disable=expression-not-assigned
+             if isinstance(app.method_info, dict) and seq in app.method_info
+             for commands in app.method_info[seq] if commands not in source[seq]]
         source['restart'] = next((True for app in changed_content
                                   if app.method_info['restart']), False)
     else:
@@ -716,7 +724,7 @@ class RunSingleInstance(object):
         :return: None
         """
         try:
-            if not self.__is_running:
+            if not self.__is_running and self.__filelock and not self.__filelock.closed:
                 fcntl.lockf(self.__filelock, fcntl.LOCK_UN)
                 self.__filelock.close()
                 os.unlink(self.__lockfile)

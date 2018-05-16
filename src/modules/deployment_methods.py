@@ -18,7 +18,7 @@ CP_METHOD_COPY_IN_PLACE = 'copy_in_place'
 UPDATE_METHODS = [CP_METHOD_COPY_IN_PLACE, CP_METHOD_COPY]
 
 DM_MANDATORY_KEYS = ['path', 'update_method']
-DM_BOOL_KEYS = ['delete_first', 'all_sites', 'restart', 'skip_templating']
+DM_BOOL_KEYS = ['delete_first', 'all_sites', 'restart', 'skip_templating', "no_appetite_changes"]
 
 DM_STARTUP_PREFIX = 'StartupBootstrap_'
 
